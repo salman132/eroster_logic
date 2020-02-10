@@ -243,11 +243,11 @@ class RosterController extends Controller
                                         if (!empty($assigned_agent)){
                                             if ($female_allownce) {
 
-                                                $employee = Employee::where('id', $assigned_agent->agent_id)->first();
+                                                $employee = Employee::where('id','<>', $assigned_agent->agent_id)->where('role_id',6)->first();
 
                                             } else {
 
-                                                $employee = Employee::where('id', $assigned_agent->agent_id)->where('gender', '<>', 'Female')->first();
+                                                $employee = Employee::where('id','<>' ,$assigned_agent->agent_id)->where('role_id',6)->where('gender', '<>', 'Female')->first();
                                             }
                                         }
 
@@ -259,9 +259,10 @@ class RosterController extends Controller
                         }
 
                         if (!empty($employee)) {
+                           
                                 $roster_info_check1=RosterInfo::whereDate('date_list',$list)->Where(function($q)use($shift,$seat){
                                         $q->where('shift_id',$shift->id)->where('seat_id',$seat);})->count();
-                        $roster_info_check2=RosterInfo::whereDate('date_list',$list)->Where(function($q)use($shift,$employee){
+                                $roster_info_check2=RosterInfo::whereDate('date_list',$list)->Where(function($q)use($shift,$employee){
                                                                 $q->where('shift_id',$shift->id)->where('agent_id',$employee->id);})->count();
 
                                 if ($roster_info_check1==0 && $roster_info_check2==0){
@@ -273,7 +274,7 @@ class RosterController extends Controller
                                     $roster_info->date_list = $list;
                                     $roster_info->save();
                                 }
-                           
+
 
 
                         }
