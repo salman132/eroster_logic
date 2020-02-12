@@ -18,6 +18,8 @@ use Illuminate\Support\Facades\Auth;
 
 class RosterController extends Controller
 {
+
+    public $previous_shift;
     public function index(){
 
         $role_id = Auth::user()->role_id;
@@ -35,8 +37,9 @@ class RosterController extends Controller
 
         $today = Carbon::today()->toDateString();
         $projects = Project::where('status',1)->where('ends_at','>=',$today)->get();
+        $rosters = Roster::all();
 
-        return view('admin.roaster.roster.index',compact('all_permission','projects'));
+        return view('admin.roaster.roster.index',compact('all_permission','projects','rosters'));
     }
 
     public function store(Request $request){
@@ -46,6 +49,17 @@ class RosterController extends Controller
             'month_name' => 'required|date_format:m',
             'year'=> 'required|date_format:Y',
         ]);
+
+        $roster_availability = Roster::where('year',$request->year)->where('month',$request->month_name)->first();
+
+        if(!empty($roster_availability)){
+            return redirect()->back()->with([
+                "message" => "Roster is already initiated on this {$request->year} - {$request->month_name} date",
+                "message_important" => true
+            ]);
+        }
+
+
 
         $project = Project::findOrfail($request->project_id);
 
@@ -64,6 +78,8 @@ class RosterController extends Controller
                 "message_important" => true
             ]);
         }
+
+
 
         // Checking if shifts exists for project
 
@@ -180,15 +196,23 @@ class RosterController extends Controller
         }
         else{$agents_id = NULL;}
 
+        $shift_array = array();
+
+        foreach ($project->shift as $key=> $shift){
+            $shift_array[] = $shift->id;
+        }
+
+
+
 
         $seats = explode(",",$project->seat->seat_id);
-
+        $previous_shift = [];
         foreach ($lists as $list) {
-            $seat_reminder = array();
-            foreach ($project->shift as $shift){
+
+
                 foreach ($seats as $seat) {
-                $seat_reminder[]=$seat;
                     foreach ($agents_id as $agent) {
+                        foreach ($project->shift as $key=> $shift){
 
                         if ($female_allownce) {
 
@@ -251,30 +275,31 @@ class RosterController extends Controller
                                             }
                                         }
 
-                                }
+                                    }
                                 // End of foreach
 
                             }
 
                         }
 
+
                         if (!empty($employee)) {
-                           
-                                $roster_info_check1=RosterInfo::whereDate('date_list',$list)->Where(function($q)use($shift,$seat){
-                                        $q->where('shift_id',$shift->id)->where('seat_id',$seat);})->count();
-                                $roster_info_check2=RosterInfo::whereDate('date_list',$list)->Where(function($q)use($shift,$employee){
-                                                                $q->where('shift_id',$shift->id)->where('agent_id',$employee->id);})->count();
 
-                                if ($roster_info_check1==0 && $roster_info_check2==0){
-                                    $roster_info = new RosterInfo();
-                                    $roster_info->roster_id = $roster->id;
-                                    $roster_info->shift_id = $shift->id;
-                                    $roster_info->seat_id = $seat;
-                                    $roster_info->agent_id = $employee->id;
-                                    $roster_info->date_list = $list;
-                                    $roster_info->save();
-                                }
+                            $roster_info_check1=RosterInfo::whereDate('date_list',$list)->Where(function($q)use($shift,$seat){
+                                $q->where('shift_id',$shift->id)->where('seat_id',$seat);})->count();
+                            $roster_info_check2=RosterInfo::whereDate('date_list',$list)->Where(function($q)use($shift,$employee){
+                                $q->where('shift_id',$shift->id)->where('agent_id',$employee->id);})->count();
+                            $roster_agent = RosterInfo::where('date_list',$list)->where('agent_id',$employee->id)->count();
 
+                            if ($roster_info_check1==0 && $roster_info_check2==0 && $roster_agent==0){
+                                $roster_info = new RosterInfo();
+                                $roster_info->roster_id = $roster->id;
+                                $roster_info->shift_id = $shift->id;
+                                $roster_info->seat_id = $seat;
+                                $roster_info->agent_id = $employee->id;
+                                $roster_info->date_list = $list;
+                                $roster_info->save();
+                            }
 
 
                         }
@@ -282,6 +307,8 @@ class RosterController extends Controller
                     }
                 }
             }
+
+
 
 
         }
