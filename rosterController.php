@@ -15,11 +15,12 @@ use App\RosterInfo;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class RosterController extends Controller
 {
 
-    public $previous_shift;
+
     public function index(){
 
         $role_id = Auth::user()->role_id;
@@ -37,10 +38,101 @@ class RosterController extends Controller
 
         $today = Carbon::today()->toDateString();
         $projects = Project::where('status',1)->where('ends_at','>=',$today)->get();
-        $rosters = Roster::all();
+        $rosters = Roster::orderBY('created_at','DESC')->paginate(10);
 
         return view('admin.roaster.roster.index',compact('all_permission','projects','rosters'));
     }
+
+    public function view($id){
+        $role_id = Auth::user()->role_id;
+
+        $employee_permission = EmployeeRolesPermission::where('role_id',$role_id)->where('perm_id',130)->get();
+
+        if(count($employee_permission) < 1){
+            return redirect('permission-error')->with([
+                'message' => language_data('You do not have permission to view this page'),
+                'message_important'=>true
+            ]);
+        }
+
+
+        $roster_infos = RosterInfo::where('roster_id',$id)->groupBy('date_list')->get();
+
+        $roster = Roster::findOrFail($id);
+
+        return view('admin.roaster.roster.view',compact('roster_infos','roster'));
+
+
+
+
+
+
+    }
+
+    public function update(Request $request,$id){
+
+        $this->validate($request,[
+            'old_roster_id'=> 'required|integer|min:1',
+            'date'=> 'required|date_format:Y-m-d',
+            'seat_id'=> 'required|integer|min:1',
+            'shift_id'=> 'required|integer|min:1',
+        ]);
+
+
+
+        $old_rosterinfo = RosterInfo::findOrFail($request->old_roster_id);
+        $old_agent = $old_rosterinfo->agent_id;
+
+
+
+        $new_rosterinfo = RosterInfo::where('roster_id',$id)
+            ->whereDate('date_list',$request->date)
+            ->where('seat_id',$request->seat_id)
+            ->where('shift_id',$request->shift_id)->first();
+
+
+        $new_agent = $new_rosterinfo->agent_id;
+
+
+
+        // Updating old agent
+        $roster_swap_first = RosterInfo::findOrFail($old_rosterinfo->id);
+        $roster_swap_first->agent_id = $new_agent;
+        $roster_swap_first->save();
+
+
+        // Updating new agent
+        $roster_swap_second = RosterInfo::findOrFail($new_rosterinfo->id);
+        $roster_swap_second->agent_id = $old_agent;
+        $roster_swap_second->save();
+
+
+
+        return redirect()->back()->with([
+            "message" => "Roster Swapped Successfully",
+        ]);
+
+
+
+
+    }
+
+    public function date_wise(){
+        $role_id = Auth::user()->role_id;
+
+        $employee_permission = EmployeeRolesPermission::where('role_id',$role_id)->where('perm_id',130)->get();
+
+        if(count($employee_permission) < 1){
+            return redirect('permission-error')->with([
+                'message' => language_data('You do not have permission to view this page'),
+                'message_important'=>true
+            ]);
+        }
+
+        return view('admin.roaster.roster.datewise');
+
+    }
+
 
     public function store(Request $request){
 
@@ -54,7 +146,7 @@ class RosterController extends Controller
 
         if(!empty($roster_availability)){
             return redirect()->back()->with([
-                "message" => "Roster is already initiated on this {$request->year} - {$request->month_name} date",
+                "message" => "Roster is already initiated on this {$request->year}-{$request->month_name} date",
                 "message_important" => true
             ]);
         }
@@ -313,6 +405,97 @@ class RosterController extends Controller
 
         }
 
+
+
+        return redirect()->back()->with([
+            "message" => "Roster Generated Successfully",
+        ]);
+
+
+    }
+
+    public function find_seat(Request $request){
+
+        $this->validate($request,[
+            'roster_id'=>'required|integer|min:1',
+            'date'=> 'required|date_format:Y-m-d',
+        ]);
+
+
+        if($request->ajax()){
+            $roster = RosterInfo::where('roster_id',$request->roster_id)
+                ->where('date_list',$request->date)
+                ->groupBy('seat_id')
+                ->get();
+            if(count($roster)>0){
+                return view('admin.roaster.roster.ajax.agent_swapping',compact('roster'))->render();
+            }
+            else{
+                return "No Data Found";
+            }
+        }
+    }
+
+
+    public function find_shift(Request $request){
+        $this->validate($request,[
+            'roster_id'=>'required|integer|min:1',
+            'date'=> 'required|date_format:Y-m-d',
+        ]);
+
+
+        if($request->ajax()){
+            $roster = RosterInfo::where('roster_id',$request->roster_id)->where('date_list',$request->date)->groupBy('shift_id')->get();
+            if(count($roster)>0){
+                return view('admin.roaster.roster.ajax.find_shift',compact('roster'))->render();
+            }
+            else{
+                return "No Data Found";
+            }
+        }
+    }
+
+
+
+    public function find_agent(Request $request){
+        $this->validate($request,[
+            'roster_id'=>'required|integer|min:1',
+            'date'=> 'required|date_format:Y-m-d',
+            'seat_id'=> 'required|integer|min:1',
+            'shift_id' => 'required|integer|min:1'
+        ]);
+
+        if($request->ajax()){
+            $roster = RosterInfo::where('roster_id',$request->roster_id)
+                ->where('date_list',$request->date)
+                ->where('seat_id',$request->seat_id)
+                ->where('shift_id',$request->shift_id)->first();
+
+            return view('admin.roaster.roster.ajax.find_agent',compact('roster'))->render();
+
+        }
+    }
+
+
+    public function destroy(Request $request){
+        $this->validate($request,[
+            'roster_id' => 'required|integer|min:1'
+        ]);
+
+        $roster = Roster::findOrFail($request->roster_id);
+
+        $roster->delete();
+
+        $roster_info = RosterInfo::where('roster_id',$request->roster_id)->get();
+        if(count($roster_info)>0){
+            foreach ($roster_info as $info){
+                $info->delete();
+            }
+        }
+
+        return redirect()->back()->with([
+            'message' => 'Data deleted Successfully'
+        ]);
 
     }
 
