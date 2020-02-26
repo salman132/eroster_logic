@@ -19,6 +19,23 @@ use Illuminate\Support\Facades\DB;
 
 class RosterController extends Controller
 {
+    
+    // Breaking Multi Dimensional Array Into Single
+        public function array_flatt($array) {
+            if (!is_array($array)) {
+                return FALSE;
+            }
+            $result = array();
+            foreach ($array as $key => $value) {
+                if (is_array($value)) {
+                    $result = array_merge($result, array_flatten($value));
+                }
+                else {
+                    $result[$key] = $value;
+                }
+            }
+            return $result;
+        }
 
 
     public function index(){
