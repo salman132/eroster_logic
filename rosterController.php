@@ -1,7 +1,11 @@
 <?php
 
 
+
 namespace App\Http\Controllers;
+ini_set('max_execution_time', '0'); // for infinite time of execution
+ini_set("memory_limit",-1);
+set_time_limit(0);
 use App\AssignAgentToProject;
 use App\AssignSeatToProject;
 use App\Department;
@@ -49,7 +53,7 @@ class RosterController extends Controller
         return view('admin.roaster.roster.index',compact('all_permission','projects','rosters'));
     }
 
-    public function view($id){
+    public function view(Request $request,$id){
         $role_id = Auth::user()->role_id;
 
         $employee_permission = EmployeeRolesPermission::where('role_id',$role_id)->where('perm_id',130)->get();
@@ -61,19 +65,58 @@ class RosterController extends Controller
             ]);
         }
 
+        $roster_infos = RosterInfo::where('roster_id',$id)->groupBy('date_list');
+        //For Customizing the page
+        $custom = false;
+        $searched_agent= 0;
+        $searched_shift =0;
 
-        $roster_infos = RosterInfo::where('roster_id',$id)->groupBy('date_list')->get();
+        if(!empty($request->agent)){
+            $roster_infos = RosterInfo::where('roster_id',$id)
+                ->where('agent_id',$request->agent);
+            $custom = true;
+            $searched_agent = $request->agent;
+        }
+        
+        
+
+        if(!empty($request->shift)){
+            if(empty($agent)){
+                $roster_infos = RosterInfo::where('roster_id',$id);
+            }
+            $roster_infos = $roster_infos
+                ->where('shift_id',$request->shift);
+            $custom = true;
+            $searched_shift = $request->shift;
+        }
+      
+        if(!empty($request->from) && !empty($request->to)){
+            if(empty($agent)){
+                $roster_infos = RosterInfo::where('roster_id',$id);
+            }
+            $roster_infos = $roster_infos
+                ->whereBetween('date_list',[$request->from,$request->to]);
+            $custom = true;
+        }
+
+
+        $roster_infos = $roster_infos->get();
 
         $roster = Roster::findOrFail($id);
         $project = Project::findOrFail($roster->project_id);
+        $agents = !empty($project->assigned_project->agent_id) ? explode(",", $project->assigned_project->agent_id) : null;
+        $agents = Employee::whereIn('id',$agents)->get(['fname','lname','id']);
 
         $roster_shifts = $project->shift;
 
+        $seats = explode(",",$project->seat->seat_id);
+
+        $seats = Seat::whereIN('id',$seats)->get();
 
 
 
-
-        return view('admin.roaster.roster.view',compact('roster_infos','roster','roster_seats','roster_shifts'));
+        return view('admin.roaster.roster.view',compact('roster_infos','roster','seats',
+            'roster_shifts','agents','custom','searched_agent','searched_shift'));
 
 
 
@@ -184,9 +227,6 @@ class RosterController extends Controller
 
     public function store(Request $request){
 
-        ini_set('max_execution_time', '0'); // for infinite time of execution
-        ini_set("memory_limit",-1);
-        set_time_limit(0);
 
         //Roster type 1 = Weekly , 2 = Monthly / except 1 everything is monthly
 
@@ -297,22 +337,24 @@ class RosterController extends Controller
         //Getting All days excluding off days
         $lists = $this->getting_all_days($roster_type,$roster,$request->all());
 
-        $agents_id_chunked = collect($agents_id);
-        $agents_id_chunked = $agents_id_chunked->chunk(2);
-        $shift_chunked = $project->shift->chunk(2);
-        $seats = collect($seats);
-        $seats_chunked = $seats->chunk(5);
+
+
+
 
 
 
         foreach ($lists as  $list) {
-
+            $seats = collect($seats);
+            $seats_chunked = $seats->chunk(5);
             foreach ($seats_chunked as $seats) {
                 foreach ($seats as $seat){
 
+                    $agents_id_chunked = collect($agents_id);
+                    $agents_id_chunked = $agents_id_chunked->chunk(2);
+
                     foreach ($agents_id_chunked as $agent_id){
                         foreach ($agent_id as $agent) {
-
+                            $shift_chunked = $project->shift->chunk(2);
                             foreach ($shift_chunked as $shifts){
                                 foreach ($shifts as $shift) {
 
@@ -478,10 +520,52 @@ class RosterController extends Controller
 
     }
 
+    public function custom_agent_delete(Request $request){
+        $this->validate($request,[
+            'roster_id'=>'integer|min:1'
+        ]);
+
+        RosterInfo::destroy($request->roster_id);
+        return redirect()->back()->with([
+            'message' => 'Data deleted Successfully'
+        ]);
+    }
+
     public function export($id){
+
         $roster_infos = RosterInfo::where('roster_id',$id)->get();
 
         $roster = Roster::findOrFail($id);
+
+        $agent = $_GET['agent'];
+        $shift = $_GET['shift'];
+        $from = $_GET['from'];
+        $to = $_GET['to'];
+
+        if(!empty($agent)){
+            $roster_infos = RosterInfo::where('roster_id',$id)
+                ->where('agent_id',$agent);
+
+        }
+        
+
+        if(!empty($shift)){
+           
+            $roster_infos = $roster_infos
+                ->where('shift_id',$shift);
+
+
+        }
+        if(!empty($from) && !empty($to)){
+            
+            $roster_infos = $roster_infos
+                ->whereBetween('date_list',[$from,$to]);
+        }
+
+
+        $roster_infos = $roster_infos->get();
+
+
 
         $dataArray = [];
 
