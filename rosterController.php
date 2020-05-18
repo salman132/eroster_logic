@@ -70,34 +70,38 @@ class RosterController extends Controller
         $custom = false;
         $searched_agent= 0;
         $searched_shift =0;
+        
+        if(!empty($request->agent) || !empty($request->shift) || !empty($request->from) || !empty($request->to)){
+             $custom = true;
+             $roster_infos = RosterInfo::where('roster_id',$id);
+        }
 
         if(!empty($request->agent)){
-            $roster_infos = RosterInfo::where('roster_id',$id)
+            $roster_infos = $roster_infos
                 ->where('agent_id',$request->agent);
-            $custom = true;
+           
             $searched_agent = $request->agent;
         }
         
         
+        
 
         if(!empty($request->shift)){
-            if(empty($agent)){
-                $roster_infos = RosterInfo::where('roster_id',$id);
-            }
+           
             $roster_infos = $roster_infos
                 ->where('shift_id',$request->shift);
-            $custom = true;
+         
             $searched_shift = $request->shift;
         }
+        
       
         if(!empty($request->from) && !empty($request->to)){
-            if(empty($agent)){
-                $roster_infos = RosterInfo::where('roster_id',$id);
-            }
+            
             $roster_infos = $roster_infos
                 ->whereBetween('date_list',[$request->from,$request->to]);
-            $custom = true;
+            
         }
+        
 
 
         $roster_infos = $roster_infos->get();
