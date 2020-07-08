@@ -3,9 +3,7 @@
 
 
 namespace App\Http\Controllers;
-ini_set('max_execution_time', '0'); // for infinite time of execution
-ini_set("memory_limit",-1);
-set_time_limit(0);
+// i
 use App\AssignAgentToProject;
 use App\AssignSeatToProject;
 use App\Department;
@@ -345,20 +343,20 @@ class RosterController extends Controller
 
 
 
+        $sleep = 0;
 
-
-        foreach ($lists as  $list) {
+        foreach ($lists as $list) {
             $seats = collect($seats);
-            $seats_chunked = $seats->chunk(5);
+            $seats_chunked = $seats->chunk(10);
             foreach ($seats_chunked as $seats) {
                 foreach ($seats as $seat){
 
                     $agents_id_chunked = collect($agents_id);
-                    $agents_id_chunked = $agents_id_chunked->chunk(2);
+                    $agents_id_chunked = $agents_id_chunked->chunk(5);
 
                     foreach ($agents_id_chunked as $agent_id){
                         foreach ($agent_id as $agent) {
-                            $shift_chunked = $project->shift->chunk(2);
+                            $shift_chunked = $project->shift->chunk(5);
                             foreach ($shift_chunked as $shifts){
                                 foreach ($shifts as $shift) {
 
@@ -425,6 +423,13 @@ class RosterController extends Controller
                 }
 
 
+            }
+            
+            
+            $sleep++;
+            
+            if($sleep > 10 && $sleep%2==0){
+                sleep(5);
             }
 
 
@@ -933,10 +938,150 @@ class RosterController extends Controller
                 }
             }
             $roster_seats = Seat::whereIn('id',$free_seat)->get();
+        
 
             return response()->json($roster_seats);
 
         }
+    }
+    
+       public function add_agent(Request $request,$id){
+        if($request->ajax()){
+            //If newly employee added on project
+            $project_id = $request->project_id;
+            $project_employee = AssignAgentToProject::where('project_id',$project_id)->first();
+
+            $project_employee = explode(",",$project_employee->agent_id);
+
+            //Roster Generated employee
+            $roster_id = RosterInfo::where('roster_id',$id)->distinct()->get(['agent_id']);
+            $emp_ids = array();
+            foreach ($roster_id as $value){
+                if(!in_array($value->agent_id,$emp_ids)){
+                    $emp_ids[] = $value->agent_id;
+                }
+            }
+
+            //Separating newly added who isn't in roster
+
+            if(count($project_employee) > count($emp_ids)){
+                $employees = array_merge(array_diff($project_employee,$emp_ids) ,array_diff($emp_ids,$project_employee));
+                $employees = Employee::whereIn('id',$employees)->where('status','active')->get();
+            }
+            else{
+                $employees = 0;
+               
+            }
+           
+
+
+            return response()->json($employees);
+        }
+    }
+
+    public function find_dates(Request $request,$emp_id){
+        if($request->ajax()){
+            $roster_id = (int)$request->roster_id;
+            $roster_days = RosterInfo::where('roster_id',$roster_id)->distinct()->get(['date_list']);
+            $date_list = array();
+
+            if(count($roster_days) > 0){
+                foreach ($roster_days as $days){
+                    $date_list[] = $days->date_list;
+                }
+            }
+
+            //Finding holidays
+            if(count($date_list) >0){
+                foreach ($date_list as $key=> $date){
+                    $holiday = $this->days_of_holiday($date,$emp_id);
+
+                    if($holiday >0){
+                        unset($date_list[$key]);
+                    }
+                }
+            }
+
+            return response()->json($date_list);
+
+
+        }
+    }
+
+    public function storeAgent(Request $request){
+        $this->validate($request,[
+            'roster_id'=> 'required|integer|min:1',
+            'employee_id'=> 'required|integer|min:1',
+            'days' => 'required',
+            'days.*' => 'date_format:Y-m-d',
+
+        ]);
+        $roster = Roster::find($request->roster_id);
+        if(empty($roster)){
+            return redirect()->back()->with([
+                'message' => 'No Roster Found',
+                'message_important'=>true
+            ]);
+        }
+
+        $emp_id = $request->employee_id;
+
+        $project = Project::find($roster->project_id);
+        //Already seated
+        $roster_seat = RosterInfo::where('roster_id',$roster->id)->distinct()->get(['seat_id'])->count();
+
+
+        //Seat that assigned for this project
+        $project_seat = AssignSeatToProject::where('project_id',$project->id)->first(['seat_id']);
+
+        $project_seat = explode(",",$project_seat->seat_id);
+
+        if(count($project_seat) <= $roster_seat){
+            return redirect()->route('assign.project-seat')->with([
+                "message" => "No Seat Available for this {$project->project_name}. Add Some First",
+                "message_important" => true
+            ]);
+        }
+
+
+        foreach ($request->days as $day){
+            foreach ($project->shift as $shift){
+                foreach ($project_seat as $seat){
+
+                    $obligation  = $this->obligation($day,$emp_id,$shift->id);
+
+                    $shift_check = RosterInfo::where('roster_id',$roster->id)->where('agent_id',$emp_id)
+                        ->where('date_list',$day)
+                        ->where('shift_id',$shift->id)->count();
+
+                    $seat_check = RosterInfo::where('roster_id',$roster->id)
+                        ->where('date_list',$day)
+                        ->where('shift_id',$shift->id)->where('seat_id',$seat)->count();
+
+                    $agent_check = RosterInfo::where('roster_id',$roster->id)->where('date_list',$day)
+                        ->where('agent_id',$emp_id)->count();
+
+                    $make = $obligation + $shift_check + $seat_check + $agent_check;
+
+                    if($make == 0){
+                        RosterInfo::create([
+                            'roster_id' => $roster->id,
+                            'agent_id' => $emp_id,
+                            'seat_id' => $seat,
+                            'shift_id' => $shift->id,
+                            'date_list' => $day
+                        ]);
+                    }
+
+                }
+            }
+
+        }
+
+
+        return redirect()->back()->with([
+            "message" => "Roster Generated Successfully",
+        ]);
     }
 
 
@@ -1037,12 +1182,12 @@ class RosterController extends Controller
 
 
         // Cutting off days from date
-        foreach ($lists as $key=>$list){
-            if(in_array($list,$collection_of_off_day)){
+        // foreach ($lists as $key=>$list){
+        //     if(in_array($list,$collection_of_off_day)){
 
-                unset($lists[$key]);
-            }
-        }
+        //         unset($lists[$key]);
+        //     }
+        // }
 
         return $lists;
 
